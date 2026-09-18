@@ -41,9 +41,9 @@ If `byte8/module-core` isn't in your Composer repo set, add the Byte8 Composer r
 After `composer require` + `setup:upgrade`:
 
 - A new module `Byte8_Horizon` registered with Magento.
-- A frontend route at `/horizon/*` (no admin/UI exposure — API only).
-- A `byte8_horizon_product_index` flat table (created by `db_schema.xml`).
-- A new indexer `byte8_horizon_product` you can run manually or schedule.
+- A read-only JSON API at `/horizon/api/v1/*` (no admin/UI exposure).
+- A `byte8_horizon_product_index` flat table (created by `db_schema.xml`), kept fresh by save observers.
+- A CLI command `bin/magento horizon:reindex` for full index rebuilds.
 - A new admin config section under **Stores → Configuration → Byte8 → Horizon**.
 
 See the [extension configuration page](/docs/magento-extension/configuration) for what each admin field does.
@@ -55,7 +55,7 @@ You will need:
 1. **Composer access on the Magento server.**
 2. **The Byte8 Composer registry credentials** (issued on first sign-up).
 3. **An admin login** to paste the API key.
-4. **CLI access** to run `setup:upgrade` and `indexer:reindex`.
+4. **CLI access** to run `setup:upgrade` and `horizon:reindex`.
 
 If you're using [Byte8 Orbit](https://docs.byte8.io/orbit/) for deploys, add the package to your `composer.json` and let Orbit's next deploy run `setup:upgrade` for you — no SSH needed.
 

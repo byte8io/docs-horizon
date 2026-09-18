@@ -1,105 +1,62 @@
 ---
 sidebar_position: 3
-title: Indexer behaviour
-description: How byte8_horizon_product builds the flat AI-index table and when AI sees stale data.
+title: Index freshness
+description: How the flat AI-index table stays fresh — save observers, the horizon:reindex command, and invalidation webhooks.
 ---
 
-# Indexer behaviour
+# Index freshness
 
-Magento's catalog is EAV — flexible, but expensive to read in the shapes AI agents want. The Horizon extension solves this by maintaining a **flat AI-index table** alongside Magento's stock indexes: one row per product per store view, with the attributes an AI agent actually needs (name, SKU, description, image URL, price, stock summary, category breadcrumbs).
+Magento's catalog is EAV — flexible, but expensive to read in the shapes AI agents want. The Horizon extension solves this by maintaining a **flat AI-index table** (`byte8_horizon_product_index`): denormalised rows with the fields an AI agent actually needs, so `search_products` runs a fast fulltext query instead of EAV joins.
 
-This index is built and maintained by the `byte8_horizon_product` indexer.
+## How the index stays fresh
+
+Two mechanisms, both automatic:
+
+1. **Save observers.** Product, category, and stock saves (including MSI source-item changes) trigger a partial reindex of the affected rows the moment the save commits. No cron dependency — agents see the new state on the next call.
+2. **Full rebuild command.** A CLI command rebuilds the whole table:
+
+```bash
+bin/magento horizon:reindex
+```
+
+Run the full rebuild after:
+
+- First install (the index starts empty — this step is required).
+- Bulk imports or attribute changes via SQL/CLI that bypass the save observers.
+- A module upgrade that changes the index schema.
+
+:::note
+Horizon does **not** register a Magento framework indexer — you won't find it in **System → Tools → Index Management**, and there is no "Update on Save / Update by Schedule" mode to configure. Freshness is observer-driven with `horizon:reindex` as the manual full rebuild.
+:::
 
 ## What's in the index
 
-Roughly (see the canonical schema in `module-horizon/etc/db_schema.xml`):
+One row per product, with the search-relevant fields denormalised: SKU, name, descriptions (fulltext-indexed), type, pricing, stock summary, and category references. Detail calls (`get_product`) read live from Magento's repositories, so prices and options in detail responses are never stale.
 
-| Column | Source |
-|--------|--------|
-| `entity_id` | Product `entity_id` |
-| `sku` | Product `sku` |
-| `store_id` | Store view |
-| `name` | Product `name` (store-view-scoped) |
-| `url_key` | Product URL key (store-view-scoped) |
-| `description` | Description / short description (concat, trimmed) |
-| `image_url` | Main product image (absolute, store-base-URL-aware) |
-| `price` | Final price |
-| `special_price` | Special price (if active) |
-| `currency` | Store currency code |
-| `stock_status` | Aggregated from MSI sources |
-| `category_path` | Breadcrumb-style list of category names |
-| `attributes_json` | Other indexed attributes as JSON |
-| `updated_at` | Last index time |
+## Invalidation push (webhooks)
 
-The flat shape is why the MCP gateway can serve `search_products` and `get_product` quickly — no EAV joins, no attribute lookups per row.
-
-## When the index rebuilds
-
-There are two modes, set under [admin config](/docs/magento-extension/configuration#indexer):
-
-### Update on Save (real-time)
-
-Every product save triggers a partial reindex for that product. AI agents see the new state on the next `search_products` / `get_product` call after the save commits.
-
-- **Pros:** AI sees fresh data within seconds.
-- **Cons:** Slower admin save (proportional to the number of store views), and Magento's behaviour for bulk imports degrades — every save in a 10k-product import re-indexes one row.
-
-Use this in production stores that change frequently and don't do bulk imports.
-
-### Update by Schedule (default)
-
-Saves are queued; Magento's cron picks them up and rebuilds in batches.
-
-- **Pros:** Save is fast, bulk imports behave normally.
-- **Cons:** AI can see stale data for the duration of the cron gap (default cron runs the `indexer` group every minute).
-
-Use this in stores with frequent imports, multi-store-view setups, or generally high write volume. Default for new installs.
-
-## Manual reindex
-
-You can always force a full rebuild:
-
-```bash
-bin/magento indexer:reindex byte8_horizon_product
-```
-
-Run this after:
-
-- First install (the index starts empty).
-- Bulk attribute changes via SQL (which bypass the observers).
-- Schema changes in `byte8_horizon_product_index` after a module upgrade.
-
-The first reindex on a 50k-product catalog typically takes 30–90 seconds depending on hardware.
-
-## Invalidation push
-
-The extension also pushes invalidation events to the Horizon gateway via the `Webhook` observer:
+On catalog changes, the extension also notifies the Horizon gateway (fire-and-forget, 3-second timeout, never blocks the save):
 
 ```
-POST https://horizon.byte8.io/webhooks/invalidate
+POST <gateway_url>/webhooks/invalidate
 X-Horizon-Key: <store-api-key>
-Content-Type: application/json
 
-{
-  "store_id": 1,
-  "skus": ["ABC-123", "DEF-456"]
-}
+{ "event": "product_updated", "entity_ids": [12345], "timestamp": "2026-09-18T09:00:00Z" }
 ```
 
-This lets the gateway drop any internal caches without polling the index. The webhook is best-effort fire-and-forget — if the gateway is briefly unreachable, the next scheduled reindex still wins; nothing breaks.
+Events: `product_created` / `product_updated` / `product_deleted`, `category_created` / `category_updated` / `category_deleted`, `inventory_updated`, `full_reindex`.
 
-See the [webhook reference](/docs/api/webhooks) for the full payload shape.
+Today the gateway reads your catalog live on every tool call, so there is no gateway-side cache to invalidate — the webhook exists as groundwork for a **response cache layer (coming soon)**. Wiring it up now means you get caching benefits automatically when that ships. See the [webhook reference](/docs/api/webhooks).
 
 ## When AI sees stale data
 
-In default config (`Update by Schedule`), expect up to a one-minute lag between admin save and AI visibility — bounded by the Magento cron interval. The invalidation webhook reduces this lag for the gateway's internal caches, but the underlying `byte8_horizon_product_index` table still rebuilds on its own schedule.
-
-If sub-minute freshness matters (e.g. flash-sale pricing that an agent must quote), switch to `Update on Save` and live with the slower admin saves.
+- **Search results**: fresh as of the last observer-driven index write — effectively real-time for normal admin saves; stale after SQL-level bulk changes until you run `horizon:reindex`.
+- **Product detail / inventory / orders**: read live from Magento on every call — never stale.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---------|--------------|
-| New product added in admin, not visible to `search_products` | Cron is paused; `bin/magento indexer:status byte8_horizon_product` shows pending. Run `indexer:reindex` to force, or check `cron_schedule` table. |
-| Old price still surfaced to AI after price change | `Update by Schedule` and cron hasn't run yet. Or the gateway's internal cache hasn't expired — wait a minute or rotate via the webhook. |
-| Index suddenly has 0 rows | Probably an aborted upgrade. Run `setup:upgrade` then `indexer:reindex byte8_horizon_product`. |
+| New product not visible to `search_products` | Added via import/SQL that bypassed observers — run `bin/magento horizon:reindex`. |
+| Search index empty after install | The first full rebuild hasn't run — `bin/magento horizon:reindex`. |
+| Old price in *search results* (detail is correct) | Same as above — rebuild; detail calls always read live. |

@@ -10,21 +10,26 @@ The gateway ships eight tools out of the box. Each is intentionally narrow and e
 
 All tools share these behaviours:
 
-- Per-store scope — your `X-Horizon-Key` decides which `stores` row applies.
-- Logged to `usage_logs` (visible in [Usage analytics](/docs/stores/usage-analytics)).
-- Counted against your monthly call quota.
+- Per-store scope — the API key sent as `Authorization: Bearer <key>` decides which store the call targets.
+- Logged to usage tracking (visible in [Usage analytics](/docs/stores/usage-analytics)).
+- Counted against your monthly call quota (`ping` and `list_stores` are free).
+- List tools are paginated with `limit` + `page` (1-based) and return `total_count`, `page`, `page_size` alongside the rows.
 
 ## `ping`
 
-Connectivity verification. Doesn't touch Magento.
+Connectivity verification. Doesn't touch Magento, doesn't count against quota.
 
 | Argument | Type | Notes |
 |----------|------|-------|
 | `message` | string (optional) | Echoed back in the response. |
 
-**Returns:** a string — either `"pong"` (no message) or `"pong: <message>"`.
+**Returns:** `"pong"` (no message) or `"pong: <message>"`.
 
 Use this in your client's startup probe to confirm transport + auth before issuing real tool calls.
+
+## `list_stores`
+
+Returns the store your API key is bound to (name + base URL). Useful for confirming which store a session is talking to. No arguments.
 
 ## `search_products`
 
@@ -32,55 +37,63 @@ Free-text + filter search over the AI product index.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `query` | string | Free-text. Matches against name, SKU, description. |
+| `query` | string | Free-text. Matches name, SKU, or description. |
+| `limit` | int (optional) | Default 10, capped at 50. |
+| `page` | int (optional) | 1-based page number. |
 | `category_id` | int (optional) | Filter to a category subtree. |
-| `product_type` | string (optional) | `simple`, `configurable`, `bundle`, `grouped`, `virtual`. |
-| `in_stock` | bool (optional) | `true` to limit to in-stock products only. |
-| `limit` | int (optional) | Page size. Defaults to 20, capped at 100. |
-| `offset` | int (optional) | Pagination offset. |
+| `product_type` | string (optional) | `simple`, `configurable`, `bundle`, … |
+| `in_stock_only` | bool (optional) | `true` to limit to in-stock products. |
 
-**Returns:** an array of `ProductSummary`:
+**Returns:** `{ products: ProductSummary[], total_count, page, page_size }` where each `ProductSummary` is:
 
 ```json
 {
-  "entity_id": 12345,
+  "id": 12345,
   "sku": "ABC-123",
   "name": "Acme Hiking Jacket",
-  "url_key": "acme-hiking-jacket",
-  "price": 199.00,
+  "product_type": "configurable",
+  "price": 199.0,
   "currency": "GBP",
-  "image_url": "https://shop.acme.example/media/catalog/product/a/b/abc-123.jpg",
-  "in_stock": true
+  "in_stock": true,
+  "url_path": "acme-hiking-jacket"
 }
 ```
 
-For full detail (description, tiered pricing, attributes), pass an `entity_id` or `sku` to `get_product`.
+For full detail (description, images, attributes), pass the SKU or ID to `get_product`.
 
 ## `get_product`
 
-Full product detail by SKU or entity ID.
+Full product detail by SKU or numeric ID.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `sku` | string (optional) | One of `sku` or `entity_id` is required. |
-| `entity_id` | int (optional) | Same. |
+| `identifier` | string | Product SKU (preferred) or numeric product ID. |
 
 **Returns:** a `ProductDetail`:
 
 ```json
 {
-  "entity_id": 12345,
+  "id": 12345,
   "sku": "ABC-123",
   "name": "Acme Hiking Jacket",
+  "product_type": "simple",
   "description": "Lightweight ...",
   "short_description": "Lightweight 3-season jacket.",
-  "price": 199.00,
-  "special_price": 149.00,
+  "price": 199.0,
+  "special_price": 149.0,
   "currency": "GBP",
-  "images": ["https://..."],
-  "categories": [{ "id": 4, "name": "Outdoor" }, { "id": 7, "name": "Jackets" }],
-  "attributes": { "color": "Black", "size": "L", "material": "Recycled polyester" },
-  "in_stock": true
+  "in_stock": true,
+  "qty": 42.0,
+  "url_path": "acme-hiking-jacket",
+  "images": [
+    { "url": "https://shop.acme.example/media/...jpg", "label": "Front", "position": 1, "is_main": true }
+  ],
+  "categories": [
+    { "id": 4, "name": "Outdoor", "url_path": "outdoor" }
+  ],
+  "attributes": [
+    { "code": "color", "label": "Color", "value": "Black" }
+  ]
 }
 ```
 
@@ -90,36 +103,39 @@ Walk the category tree.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `parent_id` | int (optional) | Root category if omitted. |
-| `depth` | int (optional) | How many levels to descend. Defaults to 2. |
+| `parent_id` | int (optional) | Root categories if omitted. |
+| `max_depth` | int (optional) | Levels to descend. Default 3, capped at 5. |
 
-**Returns:** a nested array of `Category` nodes, each with `id`, `name`, `url_key`, `children`.
+**Returns:** `{ categories: Category[], total_count }` — each `Category` node carries `id`, `name`, `url_path`, `parent_id`, `level`, `product_count`, and nested `children`.
 
 Use this to ground a recommendation in your actual taxonomy rather than letting the agent invent category names.
 
 ## `get_inventory`
 
-Stock levels per SKU and MSI source.
+Stock levels by SKU and MSI source. One row per (SKU, source) pair.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `skus` | string[] | Required. Up to 50 SKUs per call. |
+| `sku` | string (optional) | Filter by SKU (partial match). |
+| `in_stock_only` | bool (optional) | Only in-stock rows. |
+| `source_code` | string (optional) | Filter by MSI source (e.g. `default`, `warehouse_eu`). |
+| `limit` | int (optional) | Default 20, capped at 50. |
+| `page` | int (optional) | 1-based. |
 
-**Returns:** an array of stock entries:
+**Returns:** `{ items: InventoryItem[], total_count, page, page_size }`:
 
 ```json
 {
   "sku": "ABC-123",
-  "in_stock": true,
-  "qty": 42,
-  "sources": [
-    { "source_code": "default", "qty": 35, "status": "in_stock" },
-    { "source_code": "warehouse_eu", "qty": 7, "status": "in_stock" }
-  ]
+  "product_name": "Acme Hiking Jacket",
+  "qty": 35.0,
+  "is_in_stock": true,
+  "manage_stock": true,
+  "source_code": "default"
 }
 ```
 
-The `qty` field is the aggregated total across all sources the store's sales channel resolves to. Individual `sources` are useful when an agent needs to suggest a fulfilment region.
+An agent needing a total across sources sums the rows for the SKU; the per-source rows are useful when suggesting a fulfilment region.
 
 ## `get_orders`
 
@@ -127,15 +143,16 @@ List orders with filters.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `customer_email` | string (optional) | Filter by customer. |
-| `status` | string (optional) | `pending`, `processing`, `complete`, `closed`, `canceled`, etc. |
-| `date_from` | ISO-8601 date (optional) | |
-| `date_to` | ISO-8601 date (optional) | |
-| `limit` | int (optional) | Defaults to 20, capped at 100. |
+| `status` | string (optional) | `pending`, `processing`, `complete`, `canceled`, … |
+| `customer_email` | string (optional) | Filter by customer (partial match). |
+| `from_date` | string (optional) | `YYYY-MM-DD`. |
+| `to_date` | string (optional) | `YYYY-MM-DD`. |
+| `limit` | int (optional) | Default 20, capped at 50. |
+| `page` | int (optional) | 1-based. |
 
-**Returns:** an array of `OrderSummary` with `increment_id`, `entity_id`, `status`, `customer_email`, `grand_total`, `created_at`.
+**Returns:** `{ orders: OrderSummary[], total_count, page, page_size }` — each with `entity_id`, `increment_id`, `status`, `state`, `grand_total`, `currency`, `customer_email`, `customer_name`, `item_count`, `created_at`, `updated_at`.
 
-For full detail (items, shipments, payments) pass the `increment_id` to `get_order`.
+For full detail pass the increment ID to `get_order`.
 
 ## `get_order`
 
@@ -143,12 +160,11 @@ Full detail for a single order.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `increment_id` | string (optional) | One of `increment_id` or `entity_id` is required. |
-| `entity_id` | int (optional) | Same. |
+| `identifier` | string | Order increment ID (e.g. `"100000001"`) or entity ID. |
 
-**Returns:** an `OrderDetail` including line items, shipment tracking, payment method, billing/shipping addresses, status history.
+**Returns:** an `OrderDetail` — line items (`sku`, `name`, `qty_ordered`, `price`, `row_total`), totals (`subtotal`, `tax_amount`, `shipping_amount`, `discount_amount`, `grand_total`), billing/shipping addresses, `payment_method`, `shipping_method`, `status`, `state`, timestamps.
 
-Useful for *"where's my order?"* customer self-service flows.
+Useful for *"where's my order?"* self-service flows.
 
 ## `get_customers`
 
@@ -156,27 +172,26 @@ Customer search.
 
 | Argument | Type | Notes |
 |----------|------|-------|
-| `query` | string (optional) | Name / email partial match. |
-| `group_id` | int (optional) | Filter to a specific customer group (e.g. wholesale). |
-| `is_active` | bool (optional) | |
-| `limit` | int (optional) | Defaults to 20. |
+| `query` | string (optional) | Matches email, first name, or last name. |
+| `group_name` | string (optional) | Filter by group (e.g. `General`, `Wholesale`). |
+| `active_only` | bool (optional) | Only active accounts. |
+| `limit` | int (optional) | Default 20, capped at 50. |
+| `page` | int (optional) | 1-based. |
 
-**Returns:** an array of `CustomerSummary` — `entity_id`, `email`, `firstname`, `lastname`, `group_id`, `created_at`.
+**Returns:** `{ customers: CustomerSummary[], total_count, page, page_size }` — each with `id`, `email`, `firstname`, `lastname`, `group_name`, `is_active`, `created_at`, plus order stats (`total_orders`, `total_spent`).
 
 ## Worked example: "is SKU X in stock and how much?"
 
 A single agent turn becomes two tool calls:
 
 ```
-get_product(sku: "ABC-123")
-  → returns price + currency
+get_product(identifier: "ABC-123")
+  → price, special_price, currency, in_stock, qty
 
-get_inventory(skus: ["ABC-123"])
-  → returns qty + per-source breakdown
+get_inventory(sku: "ABC-123")
+  → per-source stock breakdown
 ```
-
-Total: 2 calls, ~150ms end-to-end on a warm Magento.
 
 ## Rate limits
 
-Per-tenant monthly call quotas are tier-driven (see [pricing](https://byte8.io/products/horizon#pricing)). Hitting the soft cap on a paid tier continues to serve requests; overage is metered and billed monthly. The Trial tier has a hard 429 cap because there's no card on file.
+Per-tenant monthly call quotas are tier-driven (see [pricing](https://byte8.io/products/horizon#pricing)). Paid tiers are soft-capped — requests keep serving past quota and the excess is tracked in [usage analytics](/docs/stores/usage-analytics). Only the free trial hard-caps at its quota.

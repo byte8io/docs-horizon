@@ -10,9 +10,9 @@ Goal: get an AI agent making real MCP calls into your Magento catalog. Three ste
 
 ## 1. Create a Horizon account
 
-Sign up at [horizon.byte8.io](https://horizon.byte8.io). If you already have a Byte8 account (Pulsar or Orbit user), the same login works — Horizon access is granted on first sign-in or via [byte8.io/products/horizon](https://byte8.io/products/horizon#pricing) checkout.
+Sign up at [horizon.byte8.io](https://horizon.byte8.io). If you already have a Byte8 account (Pulsar or Orbit user), the same login works — Horizon access is granted via [byte8.io/products/horizon](https://byte8.io/products/horizon#pricing) checkout.
 
-The Trial plan gives you 14 days, 10,000 API calls, and one store. No card required.
+Every plan starts with a **14-day free trial** — full Pro-tier features, hard-capped at the plan quota during the trial so there are no surprise charges.
 
 ## 2. Install the Magento extension
 
@@ -29,11 +29,12 @@ bin/magento cache:flush
 Then in Magento admin, go to **Stores → Configuration → Byte8 → Horizon** and:
 
 - Paste the **API key** you get from the next step (we'll come back to this).
+- Set **Gateway URL** to `https://horizon.byte8.io`.
 - Click **Save Config**.
-- Run the indexer once to build the flat AI-index table:
+- Build the flat AI-index table once:
 
 ```bash
-bin/magento indexer:reindex byte8_horizon_product
+bin/magento horizon:reindex
 ```
 
 Full walkthrough: [Install the extension](/docs/magento-extension/install).
@@ -51,7 +52,7 @@ Paste this key back into Magento admin (step 2), save config, and click **Test c
 
 ## 4. Make your first MCP call
 
-The hosted gateway lives at `https://horizon.byte8.io/mcp` (Streamable HTTP transport). Point any MCP client at it with your API key:
+The hosted gateway lives at `https://horizon.byte8.io/mcp` (Streamable HTTP transport). Point any MCP client at it with your API key as a **bearer token**:
 
 ```json
 {
@@ -60,7 +61,7 @@ The hosted gateway lives at `https://horizon.byte8.io/mcp` (Streamable HTTP tran
       "transport": "http",
       "url": "https://horizon.byte8.io/mcp",
       "headers": {
-        "X-Horizon-Key": "YOUR_API_KEY_HERE"
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
       }
     }
   }

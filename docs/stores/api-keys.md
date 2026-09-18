@@ -10,18 +10,17 @@ Every connected store gets one API key. It's the only credential that lets the H
 
 ## What a key is and isn't
 
-- **Is:** a random opaque token (UUID-ish, ~36 chars) generated server-side at store creation or rotation.
-- **Is:** hashed at rest in `byte8_horizon.stores.api_key`. Even Byte8 staff can't read the cleartext after creation.
-- **Is:** sent on every MCP call as `X-Horizon-Key` (or `Authorization: Bearer <key>`) by the AI agent's client.
+- **Is:** a random opaque token (`hz_`-prefixed) generated server-side at store creation or rotation.
+- **Is:** stored encrypted at rest and never displayed again after creation.
+- **Is:** used on **both halves** of the connection: the AI agent's client sends it to the gateway as `Authorization: Bearer <key>`, and the gateway forwards the same key to your Magento as `X-Horizon-Key` — which is why you paste the same value into Magento admin. Rotating it therefore means updating both agent clients *and* Magento admin.
 - **Isn't:** a JWT. There's no expiry, no scope, no issuer claim. Rotation is the only invalidation mechanism.
-- **Isn't:** the same key Magento uses to authenticate the gateway. That's a *separate* key configured on the Magento admin side. Two halves of the connection have two keys; rotating one doesn't affect the other.
 
 ## Creating a key
 
 A key is generated the moment a store is created in the dashboard. The response shows the cleartext **exactly once** — copy it now, paste it into both:
 
 1. The Magento extension config (`Stores → Configuration → Byte8 → Horizon → API key`).
-2. Wherever your agent client reads its `X-Horizon-Key` header (Claude Desktop config, env var, secret manager).
+2. Wherever your agent client reads its bearer token (Claude Desktop config, env var, secret manager).
 
 After you close the dialog or navigate away, the cleartext is gone forever.
 

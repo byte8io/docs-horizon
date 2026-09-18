@@ -50,9 +50,9 @@ If your CI runs Composer (and it should), drop the same credentials into the CI 
 After `setup:upgrade`:
 
 - Module `Byte8_Horizon` is registered.
-- Frontend route `horizon` is mounted — i.e. `https://your-store.example/horizon/*`.
-- A new table `byte8_horizon_product_index` is created.
-- An indexer `byte8_horizon_product` is registered (see [Indexer](/docs/magento-extension/indexer)).
+- The API route is mounted — i.e. `https://your-store.example/horizon/api/v1/*`.
+- A new table `byte8_horizon_product_index` is created, kept fresh by save observers (see [Index freshness](/docs/magento-extension/indexer)).
+- A CLI command `bin/magento horizon:reindex` for full index rebuilds.
 - An admin config section appears at **Stores → Configuration → Byte8 → Horizon**.
 
 ## Verify the route is mounted
@@ -60,12 +60,12 @@ After `setup:upgrade`:
 The simplest smoke test — from anywhere with internet access:
 
 ```bash
-curl -i https://your-store.example/horizon/api/health
+curl -i https://your-store.example/horizon/api/v1/health
 ```
 
-You should get a `401` with a JSON body indicating "missing API key". That's correct: the endpoint exists, it just rejected the unauthenticated call. If you get a Magento 404 page, `setup:upgrade` didn't pick up the module — recheck the install.
+Before configuration you'll get a `503` with code `DISABLED` (module not enabled yet) or `NOT_CONFIGURED` (no API key saved) — that's correct: the endpoint exists, it just isn't configured. If you get a Magento 404 page, `setup:upgrade` didn't pick up the module — recheck the install.
 
-Once the API key is set in admin (next page), the gateway will start getting `200` from the same endpoint with `X-Horizon-Key: <key>`.
+Once **Enabled** is on and the API key is set in admin (next page), the same endpoint returns `200` with `X-Horizon-Key: <key>` — and `401` for a wrong key.
 
 ## Updating the extension
 

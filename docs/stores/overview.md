@@ -6,12 +6,7 @@ description: How stores are organised in the Horizon dashboard — one row per c
 
 # Stores overview
 
-A **store** in Horizon is one connected Magento — typically one row per `base_url`. If your Magento install serves multiple websites or store views, you have a choice:
-
-- **Single Horizon store, multiple Magento views.** The Magento extension already indexes per store view, and tool responses carry `store_id`. Agents can target a specific view by including it in the query.
-- **Separate Horizon stores per brand / region / staging vs prod.** Cleaner isolation, separate usage tracking, separate keys. Choose this if billing or quota separation matters.
-
-Most agencies pick the latter; most direct merchants pick the former.
+A **store** in Horizon is one connected Magento — one row per base URL. If your Magento install serves multiple websites or brands, connect each storefront base URL as its **own Horizon store**: separate API keys, separate usage tracking, clean isolation. (Per-store-view targeting within a single connection is not supported today.)
 
 ## What lives on a store record
 
@@ -33,11 +28,12 @@ The number of stores you can create is tier-driven:
 
 | Tier | Max stores |
 |------|------------|
-| Trial | 1 |
 | Starter | 1 |
 | Pro | 3 |
 | Agency | 15 |
 | Enterprise | Custom |
+
+The 14-day free trial runs on your chosen plan's limits.
 
 When you hit the limit, the dashboard surfaces the constraint and `createStore` returns a structured error. Upgrading or removing an unused store unblocks immediately.
 
@@ -53,7 +49,7 @@ Inactive stores still count toward your max-stores limit. Delete the record outr
 
 ## Deleting a store
 
-Deleting removes the `stores` row, invalidates the API key, and tombstones the usage log records (kept for audit but no longer surfaced). The Magento side is untouched — you should also disable the extension or rotate the key on Magento admin if you don't want stale `/horizon/*` traffic.
+Deleting removes the store, invalidates the API key, and detaches its usage history (retained for account-level totals, no longer attributable to the store). The Magento side is untouched — you should also disable the extension or rotate the key on Magento admin if you don't want stale `/horizon/*` traffic.
 
 ## Next
 

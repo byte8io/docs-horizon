@@ -24,6 +24,7 @@ On save, the dashboard generates the store record and returns the **API key one 
 Back in Magento admin: **Stores → Configuration → Byte8 → Horizon**.
 
 - **API key** — paste it.
+- **Gateway URL** — `https://horizon.byte8.io`.
 - **Enabled** — set to `Yes`.
 - Save config.
 
@@ -35,40 +36,40 @@ bin/magento cache:flush config
 
 ## 3. Run the index
 
-The first reindex builds the AI-friendly flat product table:
+The first rebuild fills the AI-friendly flat product table:
 
 ```bash
-bin/magento indexer:reindex byte8_horizon_product
+bin/magento horizon:reindex
 ```
 
-For ongoing freshness, set the indexer to **"Update by Schedule"** in **System → Tools → Index Management** so saved products land in the index automatically. See the [indexer page](/docs/magento-extension/indexer) for why this matters.
+After that, save observers keep the index fresh automatically — no cron or Index Management configuration needed. See the [index freshness page](/docs/magento-extension/indexer).
 
 ## 4. Test the connection
 
-In the Horizon dashboard, open the store and click **Test connection**. The gateway makes a `GET /horizon/api/health` call to your Magento using the API key. You should see:
+In the Horizon dashboard, open the store and click **Test connection**. The gateway makes a `GET /horizon/api/v1/health` call to your Magento using the API key. You should see:
 
 - ✅ A green check
-- The Magento version reported by the store
-- A round-trip latency in milliseconds
+- The Magento version and extension version reported by the store
 
 If you see red, the dashboard shows the HTTP status it got back. Most common causes:
 
-- **401 / 403** — API key mismatch (recheck both sides).
-- **404** — the `/horizon/*` route isn't mounted (did you run `setup:upgrade`?).
+- **401** — API key mismatch (recheck both sides). **503** — module disabled or key not yet saved on the Magento side.
+- **404** — the `/horizon/api/v1/*` route isn't mounted (did you run `setup:upgrade`?).
 - **DNS / TLS error** — the base URL isn't reachable from the public internet. The gateway can't reach a private staging environment unless it's behind a public TLS endpoint.
 
 ## 5. Make your first MCP call
 
-Use any MCP client. From the [Anthropic Claude SDK](https://docs.claude.com/en/api/agent-sdk/overview):
+Use any MCP client. With the Anthropic SDK's MCP connector (beta):
 
 ```python
 from anthropic import Anthropic
 
 client = Anthropic()
 
-response = client.messages.create(
-    model="claude-sonnet-4-6",
+response = client.beta.messages.create(
+    model="claude-sonnet-5",
     max_tokens=1024,
+    betas=["mcp-client-2025-11-20"],
     mcp_servers=[
         {
             "type": "url",
@@ -77,6 +78,7 @@ response = client.messages.create(
             "authorization_token": "YOUR_API_KEY_HERE",
         }
     ],
+    tools=[{"type": "mcp_toolset", "mcp_server_name": "horizon"}],
     messages=[
         {"role": "user", "content": "Search the Acme catalog for hiking jackets in stock."}
     ],

@@ -33,12 +33,16 @@ Out of the box, agents get eight tools that map cleanly onto a Magento storefron
 | `get_order` | Drill into a specific increment ID. |
 | `get_customers` | Look up an account by email or name. |
 
-See the [MCP tools reference](/docs/mcp/tools) for the full signature of each.
+See the [MCP tools reference](/docs/mcp/tools) for the full signature of each (plus two utility tools, `ping` and `list_stores`).
+
+## The AI Shopping Assistant
+
+Beyond making your catalog visible to *external* AI agents, Horizon ships an **on-site AI Shopping Assistant** — a chat widget on your own storefront that answers product and order-status questions from your live catalog, hosted end-to-end by Byte8. One toggle in the dashboard, one toggle in Magento admin. See [AI Shopping Assistant](/docs/assistant).
 
 ## Where Horizon fits
 
 - ✅ **Magento 2 / Adobe Commerce stores** with a real catalog and traffic.
-- ✅ **B2B and B2C** — multi-store-view setups are first-class.
+- ✅ **B2B and B2C.** One Horizon store maps to one storefront base URL — connect sibling brands or regions as separate stores.
 - ✅ **Agency-managed stacks** — one Agency plan covers up to 15 stores.
 - ⚠️ **Magento 1** is not supported.
 - ⚠️ **Headless / non-Magento storefronts** — out of scope for now.
@@ -51,6 +55,7 @@ See the [MCP tools reference](/docs/mcp/tools) for the full signature of each.
 | Install the Magento extension | [Install the extension](/docs/magento-extension/install) |
 | Understand the MCP gateway shape | [MCP overview](/docs/mcp/overview) |
 | Connect Claude / Claude Desktop | [Connecting Claude](/docs/mcp/connecting-claude) |
+| Put an AI assistant on your storefront | [AI Shopping Assistant](/docs/assistant) |
 | Rotate or revoke a leaked API key | [API keys](/docs/stores/api-keys) |
 | Diagnose a failed tool call | [Troubleshooting](/docs/troubleshooting) |
 

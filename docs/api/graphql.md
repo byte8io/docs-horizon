@@ -6,7 +6,7 @@ description: The Horizon dashboard's GraphQL endpoint — store management, conn
 
 # GraphQL admin API
 
-The Horizon dashboard is backed by an `async-graphql` admin API. The same API is available to you for scripting bulk store onboarding, rotating keys across many stores, or pulling usage data into your own dashboards.
+The Horizon dashboard is backed by an `async-graphql` admin API. The same API is available for scripting store onboarding, rotating keys, or pulling usage data into your own dashboards.
 
 ## Endpoint
 
@@ -14,13 +14,13 @@ The Horizon dashboard is backed by an `async-graphql` admin API. The same API is
 POST https://horizon.byte8.io/graphql
 ```
 
-`GET` the same URL for the GraphiQL playground (development convenience — disabled in some environments).
+`GET` the same URL serves the GraphiQL playground.
 
 ## Authentication
 
-Authenticated via the Byte8 platform's session cookie (`byte8.session_token`) issued by [auth.byte8.io](https://auth.byte8.io). The dashboard's browser already has this cookie; for server-to-server scripting you'll need to use a Personal Access Token (issued from your Byte8 account settings — same flow as Orbit).
+Authenticated via the Byte8 platform's session cookie (`byte8.session_token`) issued by [app.byte8.io](https://app.byte8.io). The dashboard's browser already has this cookie. Header-token access for server-to-server scripting (Personal Access Tokens) is **coming soon** — today the API is session-cookie only.
 
-This is **separate from** the MCP `X-Horizon-Key` header. The admin API authorises *you the operator* to manage stores; the MCP API authorises *an agent* to call into a specific store.
+This is **separate from** the MCP bearer key. The admin API authorises *you the operator* to manage stores; the MCP API authorises *an agent* to call into a specific store.
 
 ## Schema overview
 
@@ -36,9 +36,14 @@ type Query {
   dashboardStats: DashboardStats!
 
   # Usage
-  usageAnalytics(days: Int!): UsageAnalytics!
-  storeUsageAnalytics(storeId: ID!, days: Int!): UsageAnalytics!
-  rateLimitStatus: RateLimitStatus!
+  usageAnalytics(days: Int): UsageAnalytics!
+  storeUsageAnalytics(storeId: ID!, days: Int): UsageAnalytics!
+  rateLimitStatus: RateLimitInfo!
+
+  # AI Shopping Assistant
+  assistantSettings(storeId: ID!): AssistantSettings
+  conversations(storeId: ID!, first: Int, after: String): ConversationConnection!
+  conversation(id: ID!): ConversationDetail
 }
 ```
 
@@ -51,6 +56,10 @@ type Mutation {
   deleteStore(id: ID!): Boolean!
   testStoreConnection(id: ID!): StoreConnectionStatus!
   rotateStoreApiKey(id: ID!): StoreWithApiKey!
+
+  # AI Shopping Assistant
+  updateAssistantSettings(storeId: ID!, input: UpdateAssistantSettingsInput!): AssistantSettings!
+  rotateAssistantKey(storeId: ID!): AssistantSettingsWithKey!
 }
 ```
 
@@ -67,18 +76,43 @@ type Store {
 }
 
 # Only returned by createStore and rotateStoreApiKey — the cleartext key is
-# shown to you exactly once.
+# shown to you exactly once. Same fields as Store, plus the key.
 type StoreWithApiKey {
-  store: Store!
+  id: ID!
+  name: String!
+  baseUrl: String!
   apiKey: String!
+  isActive: Boolean!
+  createdAt: String!
+  updatedAt: String!
 }
 
 type StoreConnectionStatus {
-  reachable: Boolean!
+  connected: Boolean!
+  extensionVersion: String
   magentoVersion: String
-  moduleVersion: String
-  latencyMs: Int
   error: String
+}
+
+type UsageAnalytics {
+  daily: [DailyUsage!]!        # date, totalCalls, successfulCalls, failedCalls, avgExecutionTimeMs
+  byTool: [ToolUsage!]!        # toolName, totalCalls, successfulCalls, failedCalls, avgExecutionTimeMs
+  byStore: [StoreUsage!]!      # storeId, storeName, totalCalls
+  totalCalls: Int!
+  totalSuccessful: Int!
+  totalFailed: Int!
+  avgExecutionTimeMs: Float!
+}
+
+type RateLimitInfo {
+  planId: String!
+  currentUsage: Int!
+  monthlyLimit: Int!
+  overLimit: Boolean!
+  hardCap: Boolean!
+  usageRatio: Float!
+  maxStores: Int!
+  currentStores: Int!
 }
 
 input CreateStoreInput {
@@ -93,18 +127,17 @@ input UpdateStoreInput {
 }
 ```
 
+Assistant types (`AssistantSettings`, `ConversationConnection` — a Relay-style
+cursor connection — and `ConversationDetail` with the full transcript) are
+documented on the [assistant page](/docs/assistant).
+
 ## Worked examples
 
 ### List your stores
 
 ```graphql
 query {
-  stores {
-    id
-    name
-    baseUrl
-    isActive
-  }
+  stores { id name baseUrl isActive }
 }
 ```
 
@@ -116,7 +149,8 @@ mutation {
     name: "Acme UK Production"
     baseUrl: "https://shop.acme.example"
   }) {
-    store { id name baseUrl }
+    id
+    name
     apiKey      # capture this — shown once
   }
 }
@@ -127,10 +161,9 @@ mutation {
 ```graphql
 mutation {
   testStoreConnection(id: "abc-123-def-456") {
-    reachable
+    connected
+    extensionVersion
     magentoVersion
-    moduleVersion
-    latencyMs
     error
   }
 }
@@ -152,20 +185,14 @@ mutation {
 query {
   usageAnalytics(days: 30) {
     totalCalls
-    daily { date count successCount errorCount }
-    byTool { toolName count }
-    byStore { storeId storeName count }
+    daily { date totalCalls successfulCalls failedCalls }
+    byTool { toolName totalCalls }
+    byStore { storeId storeName totalCalls }
   }
 }
 ```
 
 ## Error model
 
-Errors follow the platform convention (see the root `CLAUDE.md`):
-
-- Transport errors return `async_graphql::Error` with a `code` extension — `NOT_FOUND`, `UNAUTHORIZED`, `BAD_REQUEST`, `INTERNAL`, `PROVIDER_ERROR`.
-- Field-scoped validation errors return inside the payload as `errors: [FieldError!]!` so a client can red-underline a specific field rather than parse exception text.
-
-## Rate limits
-
-The admin API is rate-limited per session, generously (you should never hit it from interactive use). Bulk scripts (e.g. creating 50 stores at once) should add a small sleep between calls; we may tighten this if abuse appears.
+- Unauthenticated / unauthorised requests return a GraphQL error with a `code` extension (`UNAUTHENTICATED`, `FORBIDDEN`).
+- Not-found and validation problems surface as standard GraphQL errors with a message you can display directly.

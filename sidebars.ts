@@ -31,6 +31,7 @@ const sidebars: SidebarsConfig = {
         'mcp/tools',
       ],
     },
+    'assistant',
     {
       type: 'category',
       label: 'Stores & usage',

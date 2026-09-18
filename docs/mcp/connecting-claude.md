@@ -25,7 +25,7 @@ Open Claude Desktop and go to **Settings → Developer → Edit Config**. Add a 
       "transport": "http",
       "url": "https://horizon.byte8.io/mcp",
       "headers": {
-        "X-Horizon-Key": "YOUR_API_KEY_HERE"
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
       }
     }
   }
@@ -46,12 +46,12 @@ Add one entry per store with a distinct key:
     "acme-uk": {
       "transport": "http",
       "url": "https://horizon.byte8.io/mcp",
-      "headers": { "X-Horizon-Key": "KEY_FOR_ACME_UK" }
+      "headers": { "Authorization": "Bearer KEY_FOR_ACME_UK" }
     },
     "acme-de": {
       "transport": "http",
       "url": "https://horizon.byte8.io/mcp",
-      "headers": { "X-Horizon-Key": "KEY_FOR_ACME_DE" }
+      "headers": { "Authorization": "Bearer KEY_FOR_ACME_DE" }
     }
   }
 }
@@ -61,16 +61,17 @@ Each key resolves to a different `stores` row server-side, so the two are fully 
 
 ## Anthropic SDK (Python)
 
-If you're building an agent rather than chatting:
+If you're building an agent rather than chatting, use the SDK's MCP connector (beta — note the beta flag and the `mcp_toolset` entry, both required):
 
 ```python
 from anthropic import Anthropic
 
 client = Anthropic()
 
-response = client.messages.create(
-    model="claude-sonnet-4-6",
+response = client.beta.messages.create(
+    model="claude-sonnet-5",
     max_tokens=2048,
+    betas=["mcp-client-2025-11-20"],
     mcp_servers=[
         {
             "type": "url",
@@ -79,6 +80,7 @@ response = client.messages.create(
             "authorization_token": "YOUR_API_KEY_HERE",
         }
     ],
+    tools=[{"type": "mcp_toolset", "mcp_server_name": "horizon"}],
     messages=[
         {
             "role": "user",
@@ -91,7 +93,7 @@ for block in response.content:
     print(block)
 ```
 
-The SDK forwards `authorization_token` as a `Bearer` Authorization header. Horizon accepts either `X-Horizon-Key: <key>` or `Authorization: Bearer <key>` — pick whichever your client makes natural.
+The SDK forwards `authorization_token` as an `Authorization: Bearer` header — which is exactly what the `/mcp` endpoint expects. (`X-Horizon-Key` is a different header, used only between your Magento store and the gateway.)
 
 ## Anthropic SDK (TypeScript)
 
@@ -100,9 +102,10 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic();
 
-const response = await client.messages.create({
-  model: "claude-sonnet-4-6",
+const response = await client.beta.messages.create({
+  model: "claude-sonnet-5",
   max_tokens: 2048,
+  betas: ["mcp-client-2025-11-20"],
   mcp_servers: [
     {
       type: "url",
@@ -111,6 +114,7 @@ const response = await client.messages.create({
       authorization_token: process.env.HORIZON_API_KEY!,
     },
   ],
+  tools: [{ type: "mcp_toolset", mcp_server_name: "horizon" }],
   messages: [
     { role: "user", content: "What's the stock level for SKU ABC-123?" },
   ],
@@ -123,7 +127,7 @@ console.log(response.content);
 
 Anything that speaks MCP Streamable HTTP works. Two patterns:
 
-- **Frameworks with native MCP client support** (LangGraph, AutoGen, Mastra, etc.): point them at `https://horizon.byte8.io/mcp` and set the `X-Horizon-Key` header in their HTTP transport config.
+- **Frameworks with native MCP client support** (LangGraph, AutoGen, Mastra, etc.): point them at `https://horizon.byte8.io/mcp` and set `Authorization: Bearer <key>` in their HTTP transport config.
 - **Frameworks without MCP support yet**: call the gateway's MCP endpoint directly over JSON-RPC. The full transport spec is at [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports).
 
 ## Sanity-check call
